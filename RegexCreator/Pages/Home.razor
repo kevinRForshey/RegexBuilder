@@ -1,0 +1,189 @@
+@page "/"
+@using Regex.Core
+@inject IRuleFactory RuleFactory
+@inject IRegexComposer Composer
+@inject IRegexTester Tester
+@inject IRegexPresetProvider Presets
+@inject IJSRuntime JS
+
+<PageTitle>Regex Creator</PageTitle>
+
+@{
+    var rules  = _drafts.Select(RuleFactory.Create).ToList();
+    var result = Composer.Compose(rules, _options);
+    var test   = string.IsNullOrWhiteSpace(_testInput)
+        ? null
+        : Tester.Test(result.Pattern, result.Options, _testInput);
+}
+
+<header class="page-header">
+    <h1>Regex Creator</h1>
+    <p>Build regular expressions visually — no memorisation required.</p>
+</header>
+
+<div class="layout">
+  <section class="builder">
+
+    <h2>Preset</h2>
+    <div class="preset-row">
+        <label>Start from:</label>
+        <select @onchange="ApplyPreset">
+            <option value="">— none —</option>
+            @foreach (var p in _presets)
+            {
+                <option value="@p.Name">@p.Name</option>
+            }
+        </select>
+    </div>
+
+    <h2>Conditions</h2>
+    @if (_drafts.Count == 0)
+    {
+        <p class="hint">Add a condition below, or choose a preset above.</p>
+    }
+
+    @for (int i = 0; i < _drafts.Count; i++)
+    {
+        var index = i;
+        var d = _drafts[index];
+        <div class="rule">
+            <select @bind="d.Kind">
+                <option value="@RuleKind.CharacterClass">Character type</option>
+                <option value="@RuleKind.Literal">Exact text</option>
+                <option value="@RuleKind.RawPattern">Raw regex</option>
+            </select>
+
+            @if (d.Kind == RuleKind.CharacterClass)
+            {
+                <select @bind="d.CharClass">
+                    @foreach (var c in Enum.GetValues<CharClass>())
+                    {
+                        <option value="@c">@Label(c)</option>
+                    }
+                </select>
+                @if (d.CharClass == CharClass.Custom)
+                {
+                    <input placeholder="e.g. aeiou" @bind="d.CustomSet" />
+                }
+            }
+            else if (d.Kind == RuleKind.Literal)
+            {
+                <input placeholder="text to match" @bind="d.Text" />
+            }
+            else
+            {
+                <input placeholder="\b\w+\b" @bind="d.Text" />
+            }
+
+            @if (d.Kind != RuleKind.RawPattern)
+            {
+                <span class="qty">
+                    <input type="number" min="0" @bind="d.Min" /> –
+                    <input type="number" min="0" placeholder="∞" @bind="d.Max" />
+                </span>
+            }
+
+            <button class="btn-move" disabled="@(index == 0)"               @onclick="() => Move(index, -1)">↑</button>
+            <button class="btn-move" disabled="@(index == _drafts.Count-1)" @onclick="() => Move(index,  1)">↓</button>
+            <button class="btn-remove"                                       @onclick="() => _drafts.RemoveAt(index)">✕</button>
+        </div>
+    }
+
+    <button class="btn-add" @onclick="() => _drafts.Add(new RuleDraft())">+ Add condition</button>
+
+    <h2>Options</h2>
+    <div class="options-grid">
+        <label class="option-label"><input type="checkbox" @bind="_options.AnchorStart" /> Start anchor (^)</label>
+        <label class="option-label"><input type="checkbox" @bind="_options.AnchorEnd"   /> End anchor ($)</label>
+        <label class="option-label"><input type="checkbox" @bind="_options.IgnoreCase"  /> Ignore case</label>
+        <label class="option-label"><input type="checkbox" @bind="_options.Multiline"   /> Multiline</label>
+    </div>
+
+  </section>
+
+  <section class="output">
+
+    <h2>Pattern</h2>
+    <div class="pattern-box">
+        <pre class="@(string.IsNullOrEmpty(result.Pattern) ? "empty" : "")">@(string.IsNullOrEmpty(result.Pattern) ? "(empty)" : result.Pattern)</pre>
+        <button class="btn-copy @(_copied ? "copied" : "")" @onclick="() => CopyAsync(result.Pattern)">
+            @(_copied ? "✓ Copied" : "Copy")
+        </button>
+    </div>
+
+    <h2>What it does</h2>
+    <p class="explain">@result.Description</p>
+
+    <h2>Test it</h2>
+    <textarea placeholder="Paste sample text here…" @bind="_testInput" @bind:event="oninput"></textarea>
+
+    @if (test is not null)
+    {
+        @if (!test.IsValidPattern)
+        {
+            <div class="result-err">⚠ Invalid pattern: @test.Error</div>
+        }
+        else if (test.IsMatch)
+        {
+            <div class="result-ok">✓ @test.Matches.Count match@(test.Matches.Count == 1 ? "" : "es")</div>
+            <ul class="match-list">
+                @foreach (var m in test.Matches) { <li><code>@m</code></li> }
+            </ul>
+        }
+        else
+        {
+            <div class="result-no">✗ No match</div>
+        }
+    }
+
+  </section>
+</div>
+
+@code {
+    private readonly List<RuleDraft>  _drafts  = new();
+    private readonly RegexBuildOptions _options = new();
+    private IReadOnlyList<RegexPreset> _presets = Array.Empty<RegexPreset>();
+    private string _testInput = "";
+    private bool   _copied;
+
+    protected override void OnInitialized() => _presets = Presets.GetPresets();
+
+    private void Move(int i, int delta)
+    {
+        var j = i + delta;
+        if (j < 0 || j >= _drafts.Count) return;
+        (_drafts[i], _drafts[j]) = (_drafts[j], _drafts[i]);
+    }
+
+    private void ApplyPreset(ChangeEventArgs e)
+    {
+        var preset = _presets.FirstOrDefault(p => p.Name == e.Value?.ToString());
+        if (preset is null) return;
+        _drafts.Clear();
+        _drafts.Add(new RuleDraft { Kind = RuleKind.RawPattern, Text = preset.Pattern });
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        _copied = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _copied = false;
+    }
+
+    private static string Label(CharClass c) => c switch
+    {
+        CharClass.Digit        => "Digit (0–9)",
+        CharClass.Letter       => "Letter (a–z, A–Z)",
+        CharClass.LetterUpper  => "Uppercase letter",
+        CharClass.LetterLower  => "Lowercase letter",
+        CharClass.Alphanumeric => "Letter or digit",
+        CharClass.Word         => "Word char (\\w)",
+        CharClass.Whitespace   => "Whitespace",
+        CharClass.AnyChar      => "Any character",
+        CharClass.Custom       => "Custom set…",
+        _                      => c.ToString()
+    };
+}

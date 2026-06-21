@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../Regex.Core/Regex.Core.csproj" />
+  <Project Path="../RegexCreator.Tests/RegexCreator.Tests.csproj" />
+  <Project Path="../RegexCreator/RegexCreator.csproj" />
+</Solution>
