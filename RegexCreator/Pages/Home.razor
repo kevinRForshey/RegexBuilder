@@ -11,7 +11,7 @@
 @{
     var rules  = _drafts.Select(RuleFactory.Create).ToList();
     var result = Composer.Compose(rules, _options);
-    var test   = string.IsNullOrWhiteSpace(_testInput)
+    var test   = string.IsNullOrWhiteSpace(_testInput) || string.IsNullOrEmpty(result.Pattern)
         ? null
         : Tester.Test(result.Pattern, result.Options, _testInput);
 }
@@ -63,16 +63,16 @@
                 </select>
                 @if (d.CharClass == CharClass.Custom)
                 {
-                    <input placeholder="e.g. aeiou" @bind="d.CustomSet" />
+                    <input placeholder="e.g. aeiou" @bind="d.CustomSet" @bind:event="oninput" />
                 }
             }
             else if (d.Kind == RuleKind.Literal)
             {
-                <input placeholder="text to match" @bind="d.Text" />
+                <input placeholder="text to match" @bind="d.Text" @bind:event="oninput" />
             }
             else
             {
-                <input placeholder="\b\w+\b" @bind="d.Text" />
+                <input placeholder="\b\w+\b" @bind="d.Text" @bind:event="oninput" />
             }
 
             @if (d.Kind != RuleKind.RawPattern)
@@ -119,9 +119,9 @@
 
     @if (test is not null)
     {
-        @if (!test.IsValidPattern)
+        @if (!test.IsValidPattern || test.Error is not null)
         {
-            <div class="result-err">⚠ Invalid pattern: @test.Error</div>
+            <div class="result-err">⚠ @(test.IsValidPattern ? test.Error : $"Invalid pattern: {test.Error}")</div>
         }
         else if (test.IsMatch)
         {
